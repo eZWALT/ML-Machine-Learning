@@ -5,4 +5,5 @@ matplotlib
 networkx 
 ezautoml==0.7.1
 # auto-sklearn
-
+torch_geometric==2.6.1
+torch==2.6.0
