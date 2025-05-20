@@ -24,12 +24,13 @@ from joblib import Parallel, delayed
 
 
 class UnilingualEnsembleClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, base_model_cls=RandomForestClassifier, base_model_kwargs=None, language_colname: str = "language", n_jobs: int = 1):
+    def __init__(self, base_model_cls=RandomForestClassifier, base_model_kwargs=None, language_colname: str = "language", n_jobs: int = 1, cv: int = 1):
         self.base_model_cls = base_model_cls
         self.base_model_kwargs = base_model_kwargs or {}
         self.language_colname = language_colname
         self.n_jobs = n_jobs
         self.models_ = {}
+        self.cv = cv
 
     def _fit_one(self, lang, X_lang, y_lang):
         model = self.base_model_cls(**self.base_model_kwargs)

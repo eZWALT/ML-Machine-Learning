@@ -1,90 +1,107 @@
 from sklearn.model_selection import GroupKFold
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.ensemble import RandomForestClassifier
-import pandas as pd
+from sklearn.metrics import accuracy_score
 import numpy as np
+import pandas as pd 
+from typing import Callable
+from loguru import logger
+from src.unilingual_ensemble import UnilingualEnsembleClassifier
+from sklearn.ensemble import RandomForestClassifier
 
 
-# TODO: Revise this, this shit was done by the lil generative fella
-
-def evaluate_model_with_groupkfold(
-    df: pd.DataFrame,
-    label_col: str,
-    group_col: str,
-    categorical_cols: list,
-    model=None,
-    n_splits: int = 5
-):
+def run_groupkfold_cv(X: pd.DataFrame, 
+                      y: pd.Series, 
+                      group_colname: str = "sentence_id",
+                      clf_cls=UnilingualEnsembleClassifier,
+                      clf_kwargs: dict = {
+                        'base_model_cls': RandomForestClassifier,
+                        'base_model_kwargs': {'n_estimators': 100, 'n_jobs': 1},
+                        'language_colname': 'language',
+                        'n_jobs': 4
+                      },
+                      n_splits: int = 5,
+                      metric_fn: Callable = None,
+                      verbose: bool = True):
     """
-    Perform grouped K-fold cross-validation.
-    
+    Run GroupKFold cross-validation where all nodes from the same sentence (group) stay together.
+
     Parameters:
-        df (pd.DataFrame): The full training dataframe.
-        label_col (str): Name of the target/label column (e.g., "root").
-        group_col (str): Column used for grouping (e.g., "sentence_id").
-        categorical_cols (list): List of categorical columns to one-hot encode (e.g., ["language"]).
-        model: Any scikit-learn model (default: RandomForest).
-        n_splits (int): Number of cross-validation folds.
+        X (pd.DataFrame): Feature matrix with group and language columns.
+        y (pd.Series): Target labels.
+        group_colname (str): Name of the column that groups rows by sentence.
+        clf_cls (class): Classifier class to instantiate.
+        clf_kwargs (dict): Keyword arguments to pass to the classifier.
+        n_splits (int): Number of folds.
+        random_state (int): For reproducibility.
+        metric_fn (Callable): Evaluation function. Default is sklearn's accuracy_score.
+        verbose (bool): Print fold-level results.
 
     Returns:
-        list: Accuracy scores per fold
+        List of scores (float) for each fold.
     """
-    if model is None:
-        model = RandomForestClassifier()
+    clf_kwargs = clf_kwargs or {}
+    metric_fn = metric_fn or accuracy_score
 
     gkf = GroupKFold(n_splits=n_splits)
-    groups = df[group_col]
-    y = df[label_col]
+    groups = X[group_colname]
+    scores = []
 
-    fold_accuracies = []
-    enc = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
-    
-    for fold, (train_idx, val_idx) in enumerate(gkf.split(df, y, groups)):
-        print(f"\n🔁 Fold {fold + 1}")
+    for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
+        X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
+        X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
 
-        train_df = df.iloc[train_idx].copy()
-        val_df = df.iloc[val_idx].copy()
+        clf = clf_cls(**clf_kwargs)
+        clf.fit(X_train, y_train)
+        preds = clf.predict(X_val)
 
-        # One-hot encoding
-        enc.fit(train_df[categorical_cols])
-        X_train_cat = pd.DataFrame(enc.transform(train_df[categorical_cols]),
-                                   columns=enc.get_feature_names_out(),
-                                   index=train_df.index)
-        X_val_cat = pd.DataFrame(enc.transform(val_df[categorical_cols]),
-                                 columns=enc.get_feature_names_out(),
-                                 index=val_df.index)
+        score = metric_fn(y_val, preds)
+        scores.append(score)
 
-        # Drop old categorical columns and insert encoded ones
-        train_df = pd.concat([train_df.drop(columns=categorical_cols + [label_col]), X_train_cat], axis=1)
-        val_df = pd.concat([val_df.drop(columns=categorical_cols + [label_col]), X_val_cat], axis=1)
+        if verbose:
+            logger.info(f"[Fold {fold + 1}] {metric_fn.__name__}: {score:.4f}")
 
-        X_train, y_train = train_df, df[label_col].iloc[train_idx]
-        X_val, y_val = val_df, df[label_col].iloc[val_idx]
+    if verbose:
+        logger.info(f"\nMean {metric_fn.__name__} over {n_splits} folds: {np.mean(scores):.4f}")
 
-        model.fit(X_train, y_train)
-        preds = model.predict(X_val)
-
-        acc = accuracy_score(y_val, preds)
-        print(f"✅ Fold {fold + 1} Accuracy: {acc:.4f}")
-        print(classification_report(y_val, preds, digits=4))
-        fold_accuracies.append(acc)
-
-    print(f"\n🎯 Average Accuracy across {n_splits} folds: {np.mean(fold_accuracies):.4f}")
-    return fold_accuracies
-
-
+    return scores
 
 if __name__ == "__main__":
-    import numpy as np
-    from sklearn.model_selection import GroupKFold
-    X = np.array([[1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 12]])
-    y = np.array([1, 2, 3, 4, 5, 6])
-    groups = np.array([0, 0, 2, 2, 3, 3])
-    group_kfold = GroupKFold(n_splits=2)
-    group_kfold.get_n_splits(X, y, groups)
-    print(group_kfold)
-    for i, (train_index, test_index) in enumerate(group_kfold.split(X, y, groups)):
-        print(f"Fold {i}:")
-        print(f"  Train: index={train_index}, group={groups[train_index]}")
-        print(f"  Test:  index={test_index}, group={groups[test_index]}")
+    # === Synthetic data generation === #
+    np.random.seed(42)
+    n_sentences = 10000
+    nodes_per_sentence = np.random.randint(3, 10, size=n_sentences)
+    total_nodes = sum(nodes_per_sentence)
+
+    sentence_ids = np.repeat(np.arange(n_sentences), nodes_per_sentence)
+    languages = np.random.choice(['en', 'fr', 'de', 'es'], size=n_sentences)
+    language_per_node = np.repeat(languages, nodes_per_sentence)
+
+    # Features + target (binary: root node = 1, rest = 0)
+    X = pd.DataFrame({
+        'feature1': np.random.randn(total_nodes),
+        'feature2': np.random.randn(total_nodes),
+        'language': language_per_node,
+        'sentence_id': sentence_ids
+    })
+
+    # Make root node the first one in each sentence group
+    y = pd.Series(0, index=np.arange(total_nodes))
+    sentence_starts = np.cumsum(np.concatenate(([0], nodes_per_sentence[:-1])))
+    y.iloc[sentence_starts] = 1  # root = 1, others = 0
+
+    # === Run CV === #
+    accuracies = run_groupkfold_cv(
+        X=X,
+        y=y,
+        group_colname='sentence_id',
+        clf_cls=UnilingualEnsembleClassifier,
+        clf_kwargs={
+            'base_model_cls': RandomForestClassifier,
+            'base_model_kwargs': {'n_estimators': 100, 'n_jobs': 1},
+            'language_colname': 'language',
+            'n_jobs': 4
+        },
+        n_splits=5,
+        verbose=True
+    )
+
+    logger.success(f"\nFinal Mean Accuracy: {np.mean(accuracies):.4f}")
