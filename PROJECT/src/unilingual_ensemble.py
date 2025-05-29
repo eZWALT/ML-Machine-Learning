@@ -1,10 +1,4 @@
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.ensemble import RandomForestClassifier
-import pandas as pd 
-import numpy as np
-
-# TODO Parallelize both training and inference 
-
+from sklearn.model_selection import GridSearchCV
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
 import pandas as pd
@@ -18,23 +12,43 @@ from joblib import Parallel, delayed
 # different base classifier for each language. Can be parallelized by using the#
 # n_jobs hyperparameter. The hypothesis is that this works better than a multi-#
 #-lingual model (many languages one model) due to the simplicity of classic ml #
+# we also incorporated GridSearchCV                                            #
 #                                                                              #
 # Author: Walter Troiani                                                       #
 # ===-----------------------------------------------------------------------===#
 
 
 class UnilingualEnsembleClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, base_model_cls=RandomForestClassifier, base_model_kwargs=None, language_colname: str = "language", n_jobs: int = 1, cv: int = 1):
+    def __init__(
+        self,
+        base_model_cls=RandomForestClassifier,
+        base_model_kwargs=None,
+        language_colname: str = "language",
+        n_jobs: int = 1,
+        cv: int = 2,
+        gridsearch_per_language: bool = False,
+        param_grid: dict = None,
+    ):
         self.base_model_cls = base_model_cls
         self.base_model_kwargs = base_model_kwargs or {}
         self.language_colname = language_colname
         self.n_jobs = n_jobs
         self.models_ = {}
         self.cv = cv
+        self.gridsearch_per_language = gridsearch_per_language
+        self.param_grid = param_grid
 
     def _fit_one(self, lang, X_lang, y_lang):
-        model = self.base_model_cls(**self.base_model_kwargs)
-        model.fit(X_lang, y_lang)
+        base_model = self.base_model_cls(**self.base_model_kwargs)
+        if self.gridsearch_per_language:
+            if self.param_grid is None:
+                raise ValueError("`param_grid` must be provided if gridsearch_per_language=True")
+            search = GridSearchCV(base_model, self.param_grid, cv=self.cv, n_jobs=1)
+            search.fit(X_lang, y_lang)
+            model = search.best_estimator_
+        else:
+            base_model.fit(X_lang, y_lang)
+            model = base_model
         return lang, model
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
