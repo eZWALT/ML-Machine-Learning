@@ -120,8 +120,10 @@ class UnilingualEnsembleClassifier(BaseEstimator, ClassifierMixin):
             for lang, X_lang in grouped_data.items()
         )
 
-        # Dynamically detect number of classes from one of the models
-        n_classes = list(self.models_.values())[0].n_classes_
+        # Dynamically detect number of classes from one of the models (using .classes_)
+        model0 = list(self.models_.values())[0]
+        n_classes = len(model0.classes_)
+
         probas = np.zeros((len(X), n_classes))
 
         for lang, proba in results:
@@ -129,6 +131,7 @@ class UnilingualEnsembleClassifier(BaseEstimator, ClassifierMixin):
             probas[idx] = proba
 
         return probas
+
 
         
     
