@@ -1,6 +1,7 @@
 from sklearn.model_selection import GridSearchCV
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
+from loguru import logger
 import pandas as pd
 import numpy as np
 from joblib import Parallel, delayed
@@ -49,6 +50,7 @@ class UnilingualEnsembleClassifier(BaseEstimator, ClassifierMixin):
         else:
             base_model.fit(X_lang, y_lang)
             model = base_model
+        logger.success(f"Finished training model for language: {lang}")
         return lang, model
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
